@@ -1,0 +1,21 @@
+[build-system]
+requires = ["flit"]
+build-backend = "flit.buildapi"
+
+[tool.flit.metadata]
+module = "cloudsync_gdrive"
+author = "Atakama, LLC"
+author-email = "dev-support@atakama.com"
+home-page = "https://github.com/atakamallc/cloudsync-gdrive"
+description-file="README.md"
+# MUST be from this list: https://pypi.org/pypi?%3Aaction=list_classifiers
+classifiers=["Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Lesser General Public License v3 or later (LGPLv3+)",
+    "Programming Language :: Python",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires = ["cloudsync>=v1.3.22a2", "google-oauth", "google-auth-httplib2", "google-api-python-client"]
+requires-python = ">=3.6"
+
+[tool.flit.entrypoints.cloudsync.providers]
+gdrive = "cloudsync_gdrive:GDriveProvider"
