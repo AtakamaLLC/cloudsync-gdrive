@@ -584,7 +584,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         for ent in res['files']:
             fid = ent['id']
-            pids = ent['parents']
+            if fid == oid:
+                continue
+            pids = ent.get('parents', [])
             fhash = ent.get('md5Checksum')
             name = ent['name']
             shared = ent['shared']
@@ -761,6 +763,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             for p, pid in self._trashed_ids.items():
                 if pid == oid:
                     return p
+
+        if oid == self.__root_id:
+            return "/"
 
         # todo, better cache, keep up to date, etc.
 
