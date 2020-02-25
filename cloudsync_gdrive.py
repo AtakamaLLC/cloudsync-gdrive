@@ -774,10 +774,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         if info and info.pids and info.name:
             ppath = self._path_oid(info.pids[0])
-            if ppath:
-                path = self.join(ppath, info.name)
-                self._ids[path] = oid
-                return path
+            path = self.join(ppath, info.name)
+            self._ids[path] = oid
+            return path
         return None
 
     def info_oid(self, oid: str, use_cache=True) -> Optional[GDriveInfo]:
