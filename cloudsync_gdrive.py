@@ -31,7 +31,7 @@ from cloudsync.oauth import OAuthConfig, OAuthError, OAuthProviderInfo
 CACHE_QUOTA_TIME = 120
 
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 
 class GDriveFileDoneError(Exception):
@@ -633,7 +633,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 raise CloudFileExistsError("Cannot delete non-empty folder %s:%s" % (oid, info.name))
             except StopIteration:
                 pass  # Folder is empty, delete it no problem
-        if oid == self.__root_id:
+        if oid == self._root_id:
             raise CloudFileExistsError("Cannot delete root folder")
         try:
             self._api('files', 'delete', fileId=oid)
@@ -764,7 +764,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 if pid == oid:
                     return p
 
-        if oid == self.__root_id:
+        if oid == self._root_id:
             return "/"
 
         # todo, better cache, keep up to date, etc.
