@@ -322,9 +322,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
                 ts = arrow.get(change.get('time')).float_timestamp
                 oid = change.get('fileId')
-                exists = None
-                if change.get('removed'):
-                    exists = False
+                exists = not change.get('removed')
 
                 fil = change.get('file')
                 if fil:
