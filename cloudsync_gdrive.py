@@ -31,7 +31,7 @@ from cloudsync.oauth import OAuthConfig, OAuthError, OAuthProviderInfo
 CACHE_QUOTA_TIME = 120
 
 
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 
 
 class GDriveFileDoneError(Exception):
@@ -323,8 +323,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 ts = arrow.get(change.get('time')).float_timestamp
                 oid = change.get('fileId')
                 exists = None
-                if change.get('removed'):
-                    exists = False
+                if 'removed' in change.keys():
+                    exists = not change.get('removed')
 
                 fil = change.get('file')
                 if fil:
