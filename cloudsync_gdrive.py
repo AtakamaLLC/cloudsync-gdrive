@@ -800,12 +800,23 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         return md5.hexdigest()
 
     def _info_oid(self, oid) -> Optional[GDriveInfo]:
+        if oid is None:
+            return None
+
         try:
             res = self._api('files', 'get', fileId=oid,
                             fields='name, md5Checksum, parents, mimeType, trashed, shared, capabilities, size',
                             )
         except CloudFileNotFoundError:
             log.debug("info oid %s : not found", oid)
+            if oid == self.__root_id:
+                # Root id is stale, refresh
+                self.__root_id = None
+                new_root_id = self._root_id
+                # prevent infinite recursion
+                if new_root_id != oid:
+                    return self._info_oid(new_root_id)
+
             return None
 
         log.debug("info oid %s", res)
