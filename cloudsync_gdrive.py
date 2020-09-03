@@ -52,6 +52,7 @@ class GDriveInfo(DirInfo):  # pylint: disable=too-few-public-methods
     otype: OType
     path: str
     size: int
+    trashed: bool
 
     def __init__(self, *a, pids=None, **kws):
         super().__init__(*a, **kws)
@@ -336,9 +337,11 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                     otype = NOTKNOWN
 
                 ohash = None
-                path = self._path_oid(oid, use_cache=False)
+                info = self.info_oid(oid, use_cache=False)
+                if info.trashed:
+                    exists = False
 
-                event = Event(otype, oid, path, ohash, exists, ts, new_cursor=new_cursor)
+                event = Event(otype, oid, info.path, ohash, exists, ts, new_cursor=new_cursor)
 
                 remove = []
                 for cpath, coid in self._ids.items():
@@ -809,8 +812,6 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             return None
 
         log.debug("info oid %s", res)
-        if res.get('trashed'):  # TODO: cache this result
-            return None
 
         pids = res.get('parents')
         fhash = res.get('md5Checksum')
@@ -818,12 +819,14 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         shared = res['shared']
         size = res.get('size', 0)
         readonly = not res['capabilities']['canEdit']
+        trashed = res.get('trashed')
         if res.get('mimeType') == self._folder_mime_type:
             otype = DIRECTORY
         else:
             otype = FILE
 
-        return GDriveInfo(otype, oid, fhash, None, shared=shared, readonly=readonly, pids=pids, name=name, size=size)
+        return GDriveInfo(otype, oid, fhash, None, shared=shared, readonly=readonly, pids=pids, name=name, size=size,
+                trashed=trashed)
 
     @classmethod
     def test_instance(cls):
