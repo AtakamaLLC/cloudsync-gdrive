@@ -800,9 +800,6 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         return md5.hexdigest()
 
     def _info_oid(self, oid) -> Optional[GDriveInfo]:
-        if oid is None:
-            return None
-
         try:
             res = self._api('files', 'get', fileId=oid,
                             fields='name, md5Checksum, parents, mimeType, trashed, shared, capabilities, size',
