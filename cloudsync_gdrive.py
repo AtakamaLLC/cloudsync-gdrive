@@ -52,7 +52,6 @@ class GDriveInfo(DirInfo):  # pylint: disable=too-few-public-methods
     otype: OType
     path: str
     size: int
-    trashed: bool
 
     def __init__(self, *a, pids=None, **kws):
         super().__init__(*a, **kws)
@@ -337,11 +336,12 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                     otype = NOTKNOWN
 
                 ohash = None
-                info = self.info_oid(oid, use_cache=False)
-                if info.trashed:
+                path = self._path_oid(oid, use_cache=False)
+                if not path:
+                    # Trashed
                     exists = False
 
-                event = Event(otype, oid, info.path, ohash, exists, ts, new_cursor=new_cursor)
+                event = Event(otype, oid, path, ohash, exists, ts, new_cursor=new_cursor)
 
                 remove = []
                 for cpath, coid in self._ids.items():
@@ -366,7 +366,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 self.__cursor = new_cursor
             page_token = response.get('nextPageToken')
 
-    def __prep_upload(self, path, metadata):
+    def _prep_upload(self, path, metadata):
         # modification time
         mtime = metadata.get("modifiedTime", time.time())
         mtime = arrow.get(mtime).isoformat()
@@ -400,7 +400,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         return gdrive_info
 
-    def __media_io(self, file_like) -> Tuple[MediaIoBaseUpload, int]:
+    def _media_io(self, file_like) -> Tuple[MediaIoBaseUpload, int]:
         file_like.seek(0, io.SEEK_END)
         file_size = file_like.tell()
         file_like.seek(0, io.SEEK_SET)
@@ -413,8 +413,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
     def upload(self, oid, file_like, metadata=None) -> 'OInfo':
         if not metadata:
             metadata = {}
-        gdrive_info = self.__prep_upload(None, metadata)
-        ul, size = self.__media_io(file_like)
+        gdrive_info = self._prep_upload(None, metadata)
+        ul, size = self._media_io(file_like)
 
         fields = 'id, md5Checksum'
 
@@ -449,12 +449,12 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
     def create(self, path, file_like, metadata=None) -> 'OInfo':
         if not metadata:
             metadata = {}
-        gdrive_info = self.__prep_upload(path, metadata)
+        gdrive_info = self._prep_upload(path, metadata)
 
         if self.exists_path(path):
             raise CloudFileExistsError()
 
-        ul, size = self.__media_io(file_like)
+        ul, size = self._media_io(file_like)
 
         fields = 'id, md5Checksum, size'
 
@@ -535,6 +535,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                     except StopIteration:
                         # Folder is empty, rename over it no problem
                         if possible_conflict.oid != oid:  # delete the target if we're not just changing case
+                            log.debug("REED_DEBUG, rename conflict, conflict_oid=%s, oid=%s", possible_conflict.oid, oid) 
                             self.delete(possible_conflict.oid)
 
         if not old_path:
@@ -812,6 +813,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             return None
 
         log.debug("info oid %s", res)
+        if res.get('trashed'):  # TODO: cache this result
+            return None
 
         pids = res.get('parents')
         fhash = res.get('md5Checksum')
@@ -819,14 +822,12 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         shared = res['shared']
         size = res.get('size', 0)
         readonly = not res['capabilities']['canEdit']
-        trashed = res.get('trashed')
         if res.get('mimeType') == self._folder_mime_type:
             otype = DIRECTORY
         else:
             otype = FILE
 
-        return GDriveInfo(otype, oid, fhash, None, shared=shared, readonly=readonly, pids=pids, name=name, size=size,
-                trashed=trashed)
+        return GDriveInfo(otype, oid, fhash, None, shared=shared, readonly=readonly, pids=pids, name=name, size=size)
 
     @classmethod
     def test_instance(cls):
