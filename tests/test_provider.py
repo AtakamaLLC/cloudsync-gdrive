@@ -1,19 +1,19 @@
 """Imported test suite"""
 import io
+import datetime
 
 from cloudsync.tests import *
 
-
+# Trash a given oid
+# Note, the provider will not receive an event for this action
 def trash_oid(provider, oid):
     gdrive_info = provider._prep_upload(None, {})
     gdrive_info['trashed'] = True
-    fields = 'id, md5Checksum, trashed'
 
     def api_call():
         return provider._api('files', 'update',
                          body=gdrive_info,
-                         fileId=oid,
-                         fields=fields)
+                         fileId=oid)
 
     if provider._client:
         with patch.object(provider._client._http.http, "follow_redirects", False):  # pylint: disable=protected-access
@@ -50,3 +50,20 @@ def test_trashed_files_folders(provider):
     assert file2_oid in listdir_oids
     assert not fold1_oid in listdir_oids
     assert fold2_oid in listdir_oids
+
+    # This is necessary to mimic the event received from the gdrive api if
+    # this folder were to be trashed from the web gui or from another user
+    api = provider._api
+    def patched_api(resource, method, *args, **kwargs):
+        if resource == 'changes' and method == 'list':
+            return { 'changes' : [{ 'fileId': fold1_oid, 'time': datetime.datetime.now(),
+                'file': { 'mimeType': provider._folder_mime_type }, 'removed': False}]}
+        else:
+            return api(resource, method, *args, **kwargs)
+
+    with patch.object(provider, "_api", side_effect=patched_api):
+        events = list(provider.events())
+
+    assert len(events) == 1
+    # Mark trashed folder non existant
+    assert not events[0].exists

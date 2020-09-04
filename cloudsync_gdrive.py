@@ -535,7 +535,6 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                     except StopIteration:
                         # Folder is empty, rename over it no problem
                         if possible_conflict.oid != oid:  # delete the target if we're not just changing case
-                            log.debug("REED_DEBUG, rename conflict, conflict_oid=%s, oid=%s", possible_conflict.oid, oid) 
                             self.delete(possible_conflict.oid)
 
         if not old_path:
