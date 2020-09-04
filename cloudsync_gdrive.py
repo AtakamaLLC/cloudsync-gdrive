@@ -31,7 +31,7 @@ from cloudsync.oauth import OAuthConfig, OAuthError, OAuthProviderInfo
 CACHE_QUOTA_TIME = 120
 
 
-__version__ = "1.0.5"
+__version__ = "1.0.6"
 
 
 class GDriveFileDoneError(Exception):
