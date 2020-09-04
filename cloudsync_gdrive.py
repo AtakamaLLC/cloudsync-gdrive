@@ -565,41 +565,48 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
     def listdir(self, oid) -> Generator[GDriveInfo, None, None]:
         query = f"'{oid}' in parents"
-        try:
-            res = self._api('files', 'list',
-                            q=query,
-                            spaces='drive',
-                            fields='files(id, md5Checksum, parents, name, mimeType, trashed, shared, capabilities)',
-                            pageToken=None)
-        except CloudFileNotFoundError:
-            if self._info_oid(oid):
-                return
-            log.debug("listdir oid gone %s", oid)
-            raise
+        page_token = None
+        done = False
+        while not done:
+            try:
+                res = self._api('files', 'list',
+                                q=query,
+                                spaces='drive',
+                                fields='files(id, md5Checksum, parents, name, mimeType, trashed, shared, capabilities), nextPageToken',
+                                pageToken=page_token
+                                )
+                page_token = res.get('nextPageToken', None)
+                if not page_token:
+                    done = True
+            except CloudFileNotFoundError:
+                if self._info_oid(oid):
+                    return
+                log.debug("listdir oid gone %s", oid)
+                raise
 
-        if not res or not res['files']:
-            if self.exists_oid(oid):
-                return
-            raise CloudFileNotFoundError(oid)
+            if not res or not res['files']:
+                if self.exists_oid(oid):
+                    return
+                raise CloudFileNotFoundError(oid)
 
-        log.debug("listdir got res %s", res)
+            log.debug("listdir got res %s", res)
 
-        for ent in res['files']:
-            fid = ent['id']
-            if fid == oid:
-                continue
-            pids = ent.get('parents', [])
-            fhash = ent.get('md5Checksum')
-            name = ent['name']
-            shared = ent['shared']
-            readonly = not ent['capabilities']['canEdit']
-            trashed = ent.get('trashed', False)
-            if ent.get('mimeType') == self._folder_mime_type:
-                otype = DIRECTORY
-            else:
-                otype = FILE
-            if not trashed:
-                yield GDriveInfo(otype, fid, fhash, None, shared=shared, readonly=readonly, pids=pids, name=name)
+            for ent in res['files']:
+                fid = ent['id']
+                if fid == oid:
+                    continue
+                pids = ent.get('parents', [])
+                fhash = ent.get('md5Checksum')
+                name = ent['name']
+                shared = ent['shared']
+                readonly = not ent['capabilities']['canEdit']
+                trashed = ent.get('trashed', False)
+                if ent.get('mimeType') == self._folder_mime_type:
+                    otype = DIRECTORY
+                else:
+                    otype = FILE
+                if not trashed:
+                    yield GDriveInfo(otype, fid, fhash, None, shared=shared, readonly=readonly, pids=pids, name=name)
 
     def mkdir(self, path, metadata=None) -> str:  # pylint: disable=arguments-differ
         info = self.info_path(path)
