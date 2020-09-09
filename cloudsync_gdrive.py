@@ -205,6 +205,13 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 else:
                     ret = meth.execute()
                 log.debug("api: %s (%s) -> %s", method, debug_args(args, kwargs), ret)
+'''                try:
+                    if 'name' in ret and ret['name'] == 'shared-9-9':
+                        pid = self._get_parent_id(kwargs['fileId'])
+                        drives = self._api('files', 'list')
+                        log.info("REED_DEBUG, pid=%s, drives=%s", pid, drives)
+                except Exception:
+                    pass'''
                 return ret
             except SSLError as e:
                 if "WRONG_VERSION" in str(e):
@@ -274,6 +281,10 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                             )
             self.__root_id = res['id']
             self._ids[self.sep] = self.__root_id
+            #pid = self._get_parent_id(self.__root_id)
+            #if pid:
+             #   listdirred = list(self.listdir_oid(pid))
+            #log.info("REED_DEBUG, pid=%s, listdirred=%s", pid, listdirred)
         return self.__root_id
 
     def disconnect(self):
@@ -573,7 +584,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                                 q=query,
                                 spaces='drive',
                                 fields='files(id, md5Checksum, parents, name, mimeType, trashed, shared, capabilities), nextPageToken',
-                                pageToken=page_token
+                                pageToken=page_token,
+                                supportsAllDrives=True
                                 )
                 page_token = res.get('nextPageToken', None)
                 if not page_token:
@@ -808,7 +820,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
     def _info_oid(self, oid) -> Optional[GDriveInfo]:
         try:
-            res = self._api('files', 'get', fileId=oid,
+            res = self._api('files', 'get', fileId=oid, supportsAllDrives=True,
                             fields='name, md5Checksum, parents, mimeType, trashed, shared, capabilities, size',
                             )
         except CloudFileNotFoundError:
