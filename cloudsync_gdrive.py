@@ -205,13 +205,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 else:
                     ret = meth.execute()
                 log.debug("api: %s (%s) -> %s", method, debug_args(args, kwargs), ret)
-'''                try:
-                    if 'name' in ret and ret['name'] == 'shared-9-9':
-                        pid = self._get_parent_id(kwargs['fileId'])
-                        drives = self._api('files', 'list')
-                        log.info("REED_DEBUG, pid=%s, drives=%s", pid, drives)
-                except Exception:
-                    pass'''
+                
                 return ret
             except SSLError as e:
                 if "WRONG_VERSION" in str(e):
@@ -281,10 +275,6 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                             )
             self.__root_id = res['id']
             self._ids[self.sep] = self.__root_id
-            #pid = self._get_parent_id(self.__root_id)
-            #if pid:
-             #   listdirred = list(self.listdir_oid(pid))
-            #log.info("REED_DEBUG, pid=%s, listdirred=%s", pid, listdirred)
         return self.__root_id
 
     def disconnect(self):
@@ -575,7 +565,10 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         return oid
 
     def listdir(self, oid) -> Generator[GDriveInfo, None, None]:
-        query = f"'{oid}' in parents"
+        if oid == self._root_id:
+            query = f"'{oid}' in parents or sharedWithMe"
+        else:
+            query = f"'{oid}' in parents"
         page_token = None
         done = False
         while not done:
@@ -585,6 +578,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                                 spaces='drive',
                                 fields='files(id, md5Checksum, parents, name, mimeType, trashed, shared, capabilities), nextPageToken',
                                 pageToken=page_token,
+                                includeItemsFromAllDrives=True,
                                 supportsAllDrives=True
                                 )
                 page_token = res.get('nextPageToken', None)
@@ -608,6 +602,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 if fid == oid:
                     continue
                 pids = ent.get('parents', [])
+                if not pids and pids.get('shared'):
+                    pids = [self._root_id]
                 fhash = ent.get('md5Checksum')
                 name = ent['name']
                 shared = ent['shared']
@@ -695,7 +691,10 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             _, name = self.split(path)
 
             escaped_name = self.__escape(name)
-            query = f"'{parent_id}' in parents and name='{escaped_name}'"
+            if parent_id == self._root_id:
+                query = f"(sharedWithMe or '{parent_id}' in parents) and name='{escaped_name}'"
+            else:
+                query = f"'{parent_id}' in parents and name='{escaped_name}'"
 
             res = self._api('files', 'list',
                             q=query,
@@ -726,7 +725,11 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             return None
 
         oid = ent['id']
-        pids = ent['parents']
+        pids = ent.get('parents')
+        if not pids and res.get('shared'):
+            # shared folders don't have root oid as parent
+            pids = [self._root_id]
+
         fhash = ent.get('md5Checksum')
         name = ent.get('name')
 
@@ -840,6 +843,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             return None
 
         pids = res.get('parents')
+        if not pids and res.get('shared'):
+            # shared folders don't have root oid as parent
+            pids = [self._root_id]
         fhash = res.get('md5Checksum')
         name = res.get('name')
         shared = res['shared']
