@@ -323,8 +323,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 ts = arrow.get(change.get('time')).float_timestamp
                 oid = change.get('fileId')
                 exists = None
-                if 'removed' in change.keys():
-                    exists = not change.get('removed')
+                if change.get('removed') is True:
+                    # Can't necessarily mark exists as true, could be trashed
+                    exists = False
 
                 fil = change.get('file')
                 if fil:
@@ -336,10 +337,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                     otype = NOTKNOWN
 
                 ohash = None
-                path = self._path_oid(oid, use_cache=False)
-                if not path:
-                    # Trashed
-                    exists = False
+                path = None
 
                 event = Event(otype, oid, path, ohash, exists, ts, new_cursor=new_cursor)
 
