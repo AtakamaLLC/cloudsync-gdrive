@@ -205,7 +205,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 else:
                     ret = meth.execute()
                 log.debug("api: %s (%s) -> %s", method, debug_args(args, kwargs), ret)
-                
+
                 return ret
             except SSLError as e:
                 if "WRONG_VERSION" in str(e):
@@ -602,7 +602,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 if fid == oid:
                     continue
                 pids = ent.get('parents', [])
-                if not pids and pids.get('shared'):
+                if not pids and ent.get('shared'):
+                    # shared folders without a parent should be interpreted as children of root
                     pids = [self._root_id]
                 fhash = ent.get('md5Checksum')
                 name = ent['name']
