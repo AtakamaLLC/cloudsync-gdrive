@@ -564,7 +564,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         return oid
 
-    def listdir(self, oid) -> Generator[GDriveInfo, None, None]:
+    def listdir(self, oid) -> Generator[GDriveInfo, None, None]:  # pylint: disable=too-many-branches
         if oid == self._root_id:
             query = f"'{oid}' in parents or sharedWithMe"
         else:
@@ -682,7 +682,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
     def exists_oid(self, oid):
         return self._info_oid(oid) is not None
 
-    def info_path(self, path: str, use_cache=True) -> Optional[OInfo]:  # pylint: disable=too-many-locals
+    def info_path(self, path: str, use_cache=True) -> Optional[OInfo]:  # pylint: disable=too-many-locals, too-many-branches
         if path == self.sep:
             self._ids[self.sep] = self._root_id
             return self.info_oid(self._root_id)
@@ -826,9 +826,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
     def _info_oid(self, oid) -> Optional[GDriveInfo]:
         try:
-            res = self._api('files', 'get', fileId=oid, includeItemsFromAllDrives=True, supportsAllDrives=True,
-                            fields='name, md5Checksum, parents, mimeType, trashed, shared, capabilities, size',
-                            )
+            res = self._api('files', 'get', fileId=oid, supportsAllDrives=True, 
+                            fields='name, md5Checksum, parents, mimeType, trashed, shared, capabilities, size')
         except CloudFileNotFoundError:
             log.debug("info oid %s : not found", oid)
             if oid == self.__root_id:
