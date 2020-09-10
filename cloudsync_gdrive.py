@@ -701,7 +701,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                             q=query,
                             spaces='drive',
                             fields='files(id, md5Checksum, parents, mimeType, trashed, name, shared, capabilities)',
-                            pageToken=None)
+                            pageToken=None,
+                            includeItemsFromAllDrives=True,
+                            supportsAllDrives=True)
         except CloudFileNotFoundError:
             return None
 
@@ -728,7 +730,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         oid = ent['id']
         pids = ent.get('parents')
         if not pids and res.get('shared'):
-            # shared folders don't have root oid as parent
+            # top level shared folders don't have parents, fill as root oid
             pids = [self._root_id]
 
         fhash = ent.get('md5Checksum')
@@ -824,7 +826,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
     def _info_oid(self, oid) -> Optional[GDriveInfo]:
         try:
-            res = self._api('files', 'get', fileId=oid, supportsAllDrives=True,
+            res = self._api('files', 'get', fileId=oid, includeItemsFromAllDrives=True, supportsAllDrives=True,
                             fields='name, md5Checksum, parents, mimeType, trashed, shared, capabilities, size',
                             )
         except CloudFileNotFoundError:
@@ -845,7 +847,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         pids = res.get('parents')
         if not pids and res.get('shared'):
-            # shared folders don't have root oid as parent
+            # top level shared folders don't have parents, fill as root oid
             pids = [self._root_id]
         fhash = res.get('md5Checksum')
         name = res.get('name')
