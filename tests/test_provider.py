@@ -4,16 +4,16 @@ from cloudsync.sync.state import FILE, DIRECTORY
 
 from cloudsync.tests import *
 
-from cloudsync_gdrive import EventFilter
+from cloudsync_gdrive import EventFilter as GDriveEventFilter
 
 def test_event_filter(provider):
     # root not set
     assert not provider.root_path
     event = Event(FILE, "", "", "", True)
-    assert provider._filter_event(event) == EventFilter.PROCESS
+    assert provider._filter_event(event) == GDriveEventFilter.PROCESS
     event = Event(DIRECTORY, "", "", "", False)
-    assert provider._filter_event(event) == EventFilter.PROCESS
-    assert provider._filter_event(None) == EventFilter.IGNORE
+    assert provider._filter_event(event) == GDriveEventFilter.PROCESS
+    assert provider._filter_event(None) == GDriveEventFilter.IGNORE
 
     class MockSyncState:
         def get_path(self, oid):
@@ -27,21 +27,21 @@ def test_event_filter(provider):
     # root set
     with patch.multiple(provider.prov, _root_oid="root_oid", _root_path="/root", sync_state=MockSyncState()):
         e = Event(FILE, "", "", "", False)
-        assert provider._filter_event(e) == EventFilter.IGNORE
+        assert provider._filter_event(e) == GDriveEventFilter.IGNORE
         e = Event(FILE, "in-root", "/root/path2", "hash", True)
-        assert provider._filter_event(e) == EventFilter.PROCESS
+        assert provider._filter_event(e) == GDriveEventFilter.PROCESS
         e = Event(FILE, "in-root", None, None, False)
-        assert provider._filter_event(e) == EventFilter.PROCESS
+        assert provider._filter_event(e) == GDriveEventFilter.PROCESS
         e = Event(FILE, "out-root", "/path2", "hash", True)
-        assert provider._filter_event(e) == EventFilter.IGNORE
+        assert provider._filter_event(e) == GDriveEventFilter.IGNORE
         e = Event(FILE, "out-root", None, None, False)
-        assert provider._filter_event(e) == EventFilter.IGNORE
+        assert provider._filter_event(e) == GDriveEventFilter.IGNORE
         e = Event(FILE, "in-root", "/path2", "hash", True)
-        assert provider._filter_event(e) == EventFilter.PROCESS
+        assert provider._filter_event(e) == GDriveEventFilter.PROCESS
         e = Event(FILE, "out-root", "/root/path2", "hash", True)
-        assert provider._filter_event(e) == EventFilter.PROCESS
+        assert provider._filter_event(e) == GDriveEventFilter.PROCESS
         e = Event(DIRECTORY, "out-root", "/root/path2", "hash", True)
-        assert provider._filter_event(e) == EventFilter.WALK
+        assert provider._filter_event(e) == GDriveEventFilter.WALK
 
         with pytest.raises(ValueError):
             if provider._filter_event(e):
