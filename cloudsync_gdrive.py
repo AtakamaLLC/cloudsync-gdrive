@@ -3,6 +3,7 @@ Provider "gdrive", exports GDriveProvider
 """
 # pylint: disable=missing-docstring
 
+import enum
 import io
 import time
 import logging
@@ -42,6 +43,19 @@ log = logging.getLogger(__name__)
 logging.getLogger('googleapiclient').setLevel(logging.INFO)
 logging.getLogger('googleapiclient.discovery').setLevel(logging.ERROR)
 
+class EventFilter(enum.Enum):
+    """
+    Event filter result
+    """
+    PROCESS = "process"
+    IGNORE = "ignore"
+    WALK = "walk"
+
+    def __bool__(self):
+        """
+        Protect against bool use
+        """
+        raise ValueError("never bool enums")
 
 class GDriveInfo(DirInfo):  # pylint: disable=too-few-public-methods
     pids: List[str] = []
@@ -205,6 +219,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 else:
                     ret = meth.execute()
                 log.debug("api: %s (%s) -> %s", method, debug_args(args, kwargs), ret)
+
                 return ret
             except SSLError as e:
                 if "WRONG_VERSION" in str(e):
@@ -312,57 +327,101 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             new_cursor = response.get('newStartPageToken', None)
             for change in response.get('changes'):
                 log.debug("got event %s", change)
-
-                # {'kind': 'drive#change', 'type': 'file', 'changeType': 'file', 'time': '2019-07-23T16:57:06.779Z',
-                # 'removed': False, 'fileId': '1NCi2j1SjsPUTQTtaD2dFNsrt49J8TPDd', 'file': {'kind': 'drive#file',
-                # 'id': '1NCi2j1SjsPUTQTtaD2dFNsrt49J8TPDd', 'name': 'dest', 'mimeType': 'application/octet-stream'}}
-
-                # {'kind': 'drive#change', 'type': 'file', 'changeType': 'file', 'time': '2019-07-23T20:02:14.156Z',
-                # 'removed': True, 'fileId': '1lhRe0nDplA6I5JS18642rg0KIbYN66lR'}
-
-                ts = arrow.get(change.get('time')).float_timestamp
-                oid = change.get('fileId')
-                exists = None
-                if change.get('removed') is True:
-                    # Can't necessarily mark exists as true, could be trashed
-                    exists = False
-
-                fil = change.get('file')
-                if fil:
-                    if fil.get('mimeType') == self._folder_mime_type:
-                        otype = DIRECTORY
-                    else:
-                        otype = FILE
-                else:
-                    otype = NOTKNOWN
-
-                ohash = None
-                path = None
-
-                event = Event(otype, oid, path, ohash, exists, ts, new_cursor=new_cursor)
-
-                remove = []
-                for cpath, coid in self._ids.items():
-                    if coid == oid:
-                        if cpath != path:
-                            remove.append(cpath)  # remove the event's item if it's path changed
-
-                    if path and otype == DIRECTORY and self.is_subpath(path, cpath):
-                        remove.append(cpath)  # if the event's item is a folder, uncache its children
-
-                for r in remove:
-                    self._ids.pop(r, None)
-
-                if path:
-                    self._ids[path] = oid
-
+                event = self._convert_to_event(change, new_cursor)
                 log.debug("converted event %s as %s", change, event)
-
+                filter_result = self._filter_event(event)
+                if filter_result == EventFilter.IGNORE:
+                    if event:
+                        log.debug("ignore event: %s %s %s", event.path, event.oid, event.exists)
+                    continue
+                if filter_result == EventFilter.WALK:
+                    log.debug("directory created in or renamed into root - walking: %s", event.path)
+                    try:
+                        yield from self.walk_oid(event.oid)
+                    except CloudFileNotFoundError:
+                        pass
                 yield event
 
             if new_cursor and page_token and new_cursor != page_token:
                 self.__cursor = new_cursor
             page_token = response.get('nextPageToken')
+
+    def _convert_to_event(self, change, new_cursor):
+        ts = arrow.get(change.get('time')).float_timestamp
+        oid = change.get('fileId')
+        exists = None
+        if change.get('removed') is True:
+            # Can't necessarily mark exists as true, could be trashed
+            exists = False
+
+        fil = change.get('file')
+        if fil:
+            if fil.get('mimeType') == self._folder_mime_type:
+                otype = DIRECTORY
+            else:
+                otype = FILE
+        else:
+            otype = NOTKNOWN
+
+        ohash = None
+        path = None
+
+        event = Event(otype, oid, path, ohash, exists, ts, new_cursor=new_cursor)
+
+        remove = []
+        for cpath, coid in self._ids.items():
+            if coid == oid:
+                if cpath != path:
+                    remove.append(cpath)  # remove the event's item if it's path changed
+
+            if path and otype == DIRECTORY and self.is_subpath(path, cpath):
+                remove.append(cpath)  # if the event's item is a folder, uncache its children
+
+        for r in remove:
+            self._ids.pop(r, None)
+
+        if path:
+            self._ids[path] = oid
+
+        return event
+
+    def _filter_event(self, event):
+        # event filtering based on root path and event path
+
+        if not event:
+            return EventFilter.IGNORE
+
+        if not self._root_path:
+            return EventFilter.PROCESS
+
+        state_path = self.sync_state.get_path(event.oid)
+        prior_subpath = self.is_subpath_of_root(state_path)
+        if not event.exists:
+            # delete - ignore if not in state, or in state but is not subpath of root
+            return EventFilter.PROCESS if prior_subpath else EventFilter.IGNORE
+
+        if event.path:
+            curr_subpath = self.is_subpath_of_root(event.path)
+            if curr_subpath and not prior_subpath:
+                # Can't differentiate between creates and renames without watching the entire filesystem:
+                # Event has an oid and a current path, its a rename if the oid was seen before,
+                # but since events outside root are ignored we don't catch the case where an item is
+                # created outside root and then renamed into root.
+                # Hence the walk for directories -- a tradeoff for ignoring "outside root" events.
+                log.debug("created in or renamed into root: %s", event.path)
+                if event.otype == DIRECTORY:
+                    return EventFilter.WALK
+            elif prior_subpath and not curr_subpath:
+                # Rename out of root: process the event.
+                # Treated as a delete by the sync engine, which handles non-empty folders by marking
+                # children "changed" and processing them first.
+                log.debug("renamed out of root: %s", event.path)
+            else:
+                # both curr and prior are subpaths == rename within root (process event)
+                # neither is subpath == rename outside root (ignore event)
+                return EventFilter.PROCESS if curr_subpath else EventFilter.IGNORE
+
+        return EventFilter.PROCESS
 
     def _prep_upload(self, path, metadata):
         # modification time
@@ -564,8 +623,11 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         return oid
 
-    def listdir(self, oid) -> Generator[GDriveInfo, None, None]:
-        query = f"'{oid}' in parents"
+    def listdir(self, oid) -> Generator[GDriveInfo, None, None]:  # pylint: disable=too-many-branches
+        if oid == self._root_id:
+            query = f"'{oid}' in parents or sharedWithMe"
+        else:
+            query = f"'{oid}' in parents"
         page_token = None
         done = False
         while not done:
@@ -574,7 +636,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                                 q=query,
                                 spaces='drive',
                                 fields='files(id, md5Checksum, parents, name, mimeType, trashed, shared, capabilities), nextPageToken',
-                                pageToken=page_token
+                                pageToken=page_token,
+                                includeItemsFromAllDrives=True,
+                                supportsAllDrives=True
                                 )
                 page_token = res.get('nextPageToken', None)
                 if not page_token:
@@ -597,6 +661,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 if fid == oid:
                     continue
                 pids = ent.get('parents', [])
+                if not pids and ent.get('shared'):
+                    # shared folders without a parent should be interpreted as children of root
+                    pids = [self._root_id]
                 fhash = ent.get('md5Checksum')
                 name = ent['name']
                 shared = ent['shared']
@@ -674,7 +741,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
     def exists_oid(self, oid):
         return self._info_oid(oid) is not None
 
-    def info_path(self, path: str, use_cache=True) -> Optional[OInfo]:  # pylint: disable=too-many-locals
+    def info_path(self, path: str, use_cache=True) -> Optional[OInfo]:  # pylint: disable=too-many-locals, too-many-branches
         if path == self.sep:
             self._ids[self.sep] = self._root_id
             return self.info_oid(self._root_id)
@@ -684,13 +751,18 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             _, name = self.split(path)
 
             escaped_name = self.__escape(name)
-            query = f"'{parent_id}' in parents and name='{escaped_name}'"
+            if parent_id == self._root_id:
+                query = f"(sharedWithMe or '{parent_id}' in parents) and name='{escaped_name}'"
+            else:
+                query = f"'{parent_id}' in parents and name='{escaped_name}'"
 
             res = self._api('files', 'list',
                             q=query,
                             spaces='drive',
                             fields='files(id, md5Checksum, parents, mimeType, trashed, name, shared, capabilities)',
-                            pageToken=None)
+                            pageToken=None,
+                            includeItemsFromAllDrives=True,
+                            supportsAllDrives=True)
         except CloudFileNotFoundError:
             return None
 
@@ -715,7 +787,11 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             return None
 
         oid = ent['id']
-        pids = ent['parents']
+        pids = ent.get('parents')
+        if not pids and res.get('shared'):
+            # top level shared folders don't have parents, fill as root oid
+            pids = [self._root_id]
+
         fhash = ent.get('md5Checksum')
         name = ent.get('name')
 
@@ -809,9 +885,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
     def _info_oid(self, oid) -> Optional[GDriveInfo]:
         try:
-            res = self._api('files', 'get', fileId=oid,
-                            fields='name, md5Checksum, parents, mimeType, trashed, shared, capabilities, size',
-                            )
+            res = self._api('files', 'get', fileId=oid, supportsAllDrives=True, 
+                            fields='name, md5Checksum, parents, mimeType, trashed, shared, capabilities, size')
         except CloudFileNotFoundError:
             log.debug("info oid %s : not found", oid)
             if oid == self.__root_id:
@@ -829,6 +904,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             return None
 
         pids = res.get('parents')
+        if not pids and res.get('shared'):
+            # top level shared folders don't have parents, fill as root oid
+            pids = [self._root_id]
         fhash = res.get('md5Checksum')
         name = res.get('name')
         shared = res['shared']
