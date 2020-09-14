@@ -3,6 +3,7 @@ Provider "gdrive", exports GDriveProvider
 """
 # pylint: disable=missing-docstring
 
+import enum
 import io
 import time
 import logging
@@ -42,6 +43,19 @@ log = logging.getLogger(__name__)
 logging.getLogger('googleapiclient').setLevel(logging.INFO)
 logging.getLogger('googleapiclient.discovery').setLevel(logging.ERROR)
 
+class EventFilter(enum.Enum):
+    """
+    Event filter result
+    """
+    PROCESS = "process"
+    IGNORE = "ignore"
+    WALK = "walk"
+
+    def __bool__(self):
+        """
+        Protect against bool use
+        """
+        raise ValueError("never bool enums")
 
 class GDriveInfo(DirInfo):  # pylint: disable=too-few-public-methods
     pids: List[str] = []
@@ -313,56 +327,103 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             new_cursor = response.get('newStartPageToken', None)
             for change in response.get('changes'):
                 log.debug("got event %s", change)
-
-                # {'kind': 'drive#change', 'type': 'file', 'changeType': 'file', 'time': '2019-07-23T16:57:06.779Z',
-                # 'removed': False, 'fileId': '1NCi2j1SjsPUTQTtaD2dFNsrt49J8TPDd', 'file': {'kind': 'drive#file',
-                # 'id': '1NCi2j1SjsPUTQTtaD2dFNsrt49J8TPDd', 'name': 'dest', 'mimeType': 'application/octet-stream'}}
-
-                # {'kind': 'drive#change', 'type': 'file', 'changeType': 'file', 'time': '2019-07-23T20:02:14.156Z',
-                # 'removed': True, 'fileId': '1lhRe0nDplA6I5JS18642rg0KIbYN66lR'}
-
-                ts = arrow.get(change.get('time')).float_timestamp
-                oid = change.get('fileId')
-                exists = None
-                if 'removed' in change.keys():
-                    exists = not change.get('removed')
-
-                fil = change.get('file')
-                if fil:
-                    if fil.get('mimeType') == self._folder_mime_type:
-                        otype = DIRECTORY
-                    else:
-                        otype = FILE
-                else:
-                    otype = NOTKNOWN
-
-                ohash = None
-                path = self._path_oid(oid, use_cache=False)
-
-                event = Event(otype, oid, path, ohash, exists, ts, new_cursor=new_cursor)
-
-                remove = []
-                for cpath, coid in self._ids.items():
-                    if coid == oid:
-                        if cpath != path:
-                            remove.append(cpath)  # remove the event's item if it's path changed
-
-                    if path and otype == DIRECTORY and self.is_subpath(path, cpath):
-                        remove.append(cpath)  # if the event's item is a folder, uncache its children
-
-                for r in remove:
-                    self._ids.pop(r, None)
-
-                if path:
-                    self._ids[path] = oid
-
+                event = self._convert_to_event(change, new_cursor)
                 log.debug("converted event %s as %s", change, event)
-
+                filter_result = self._filter_event(event)
+                if filter_result == EventFilter.IGNORE:
+                    if event:
+                        log.debug("ignore event: %s %s %s", event.path, event.oid, event.exists)
+                    continue
+                if filter_result == EventFilter.WALK:
+                    log.debug("directory created in or renamed into root - walking: %s", event.path)
+                    try:
+                        yield from self.walk_oid(event.oid)
+                    except CloudFileNotFoundError:
+                        pass
                 yield event
 
             if new_cursor and page_token and new_cursor != page_token:
                 self.__cursor = new_cursor
             page_token = response.get('nextPageToken')
+
+    def _convert_to_event(self, change, new_cursor):
+        ts = arrow.get(change.get('time')).float_timestamp
+        oid = change.get('fileId')
+        exists = None
+        if 'removed' in change.keys():
+            exists = not change.get('removed')
+
+        fil = change.get('file')
+        if fil:
+            if fil.get('mimeType') == self._folder_mime_type:
+                otype = DIRECTORY
+            else:
+                otype = FILE
+        else:
+            otype = NOTKNOWN
+
+        ohash = None
+        path = self._path_oid(oid, use_cache=False)
+        if not path:
+            # Trashed
+            exists = False
+
+        event = Event(otype, oid, path, ohash, exists, ts, new_cursor=new_cursor)
+
+        remove = []
+        for cpath, coid in self._ids.items():
+            if coid == oid:
+                if cpath != path:
+                    remove.append(cpath)  # remove the event's item if it's path changed
+
+            if path and otype == DIRECTORY and self.is_subpath(path, cpath):
+                remove.append(cpath)  # if the event's item is a folder, uncache its children
+
+        for r in remove:
+            self._ids.pop(r, None)
+
+        if path:
+            self._ids[path] = oid
+
+        return event
+
+    def _filter_event(self, event):
+        # event filtering based on root path and event path
+
+        if not event:
+            return EventFilter.IGNORE
+
+        if not self._root_path:
+            return EventFilter.PROCESS
+
+        state_path = self.sync_state.get_path(event.oid)
+        prior_subpath = self.is_subpath_of_root(state_path)
+        if not event.exists:
+            # delete - ignore if not in state, or in state but is not subpath of root
+            return EventFilter.PROCESS if prior_subpath else EventFilter.IGNORE
+
+        if event.path:
+            curr_subpath = self.is_subpath_of_root(event.path)
+            if curr_subpath and not prior_subpath:
+                # Can't differentiate between creates and renames without watching the entire filesystem:
+                # Event has an oid and a current path, its a rename if the oid was seen before,
+                # but since events outside root are ignored we don't catch the case where an item is
+                # created outside root and then renamed into root.
+                # Hence the walk for directories -- a tradeoff for ignoring "outside root" events.
+                log.debug("created in or renamed into root: %s", event.path)
+                if event.otype == DIRECTORY:
+                    return EventFilter.WALK
+            elif prior_subpath and not curr_subpath:
+                # Rename out of root: process the event.
+                # Treated as a delete by the sync engine, which handles non-empty folders by marking
+                # children "changed" and processing them first.
+                log.debug("renamed out of root: %s", event.path)
+            else:
+                # both curr and prior are subpaths == rename within root (process event)
+                # neither is subpath == rename outside root (ignore event)
+                return EventFilter.PROCESS if curr_subpath else EventFilter.IGNORE
+
+        return EventFilter.PROCESS
 
     def __prep_upload(self, path, metadata):
         # modification time
