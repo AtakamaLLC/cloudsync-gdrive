@@ -3,7 +3,6 @@ Provider "gdrive", exports GDriveProvider
 """
 # pylint: disable=missing-docstring
 
-import enum
 import io
 import time
 import logging
@@ -43,19 +42,6 @@ log = logging.getLogger(__name__)
 logging.getLogger('googleapiclient').setLevel(logging.INFO)
 logging.getLogger('googleapiclient.discovery').setLevel(logging.ERROR)
 
-class EventFilter(enum.Enum):
-    """
-    Event filter result
-    """
-    PROCESS = "process"
-    IGNORE = "ignore"
-    WALK = "walk"
-
-    def __bool__(self):
-        """
-        Protect against bool use
-        """
-        raise ValueError("never bool enums")
 
 class GDriveInfo(DirInfo):  # pylint: disable=too-few-public-methods
     pids: List[str] = []
@@ -329,17 +315,6 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 log.debug("got event %s", change)
                 event = self._convert_to_event(change, new_cursor)
                 log.debug("converted event %s as %s", change, event)
-                filter_result = self._filter_event(event)
-                if filter_result == EventFilter.IGNORE:
-                    if event:
-                        log.debug("ignore event: %s %s %s", event.path, event.oid, event.exists)
-                    continue
-                if filter_result == EventFilter.WALK:
-                    log.debug("directory created in or renamed into root - walking: %s", event.path)
-                    try:
-                        yield from self.walk_oid(event.oid)
-                    except CloudFileNotFoundError:
-                        pass
                 yield event
 
             if new_cursor and page_token and new_cursor != page_token:
@@ -384,44 +359,6 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             self._ids[path] = oid
 
         return event
-
-    def _filter_event(self, event):
-        # event filtering based on root path and event path
-
-        if not event:
-            return EventFilter.IGNORE
-
-        if not self._root_path:
-            return EventFilter.PROCESS
-
-        state_path = self.sync_state.get_path(event.oid)
-        prior_subpath = self.is_subpath_of_root(state_path)
-        if not event.exists:
-            # delete - ignore if not in state, or in state but is not subpath of root
-            return EventFilter.PROCESS if prior_subpath else EventFilter.IGNORE
-
-        if event.path:
-            curr_subpath = self.is_subpath_of_root(event.path)
-            if curr_subpath and not prior_subpath:
-                # Can't differentiate between creates and renames without watching the entire filesystem:
-                # Event has an oid and a current path, its a rename if the oid was seen before,
-                # but since events outside root are ignored we don't catch the case where an item is
-                # created outside root and then renamed into root.
-                # Hence the walk for directories -- a tradeoff for ignoring "outside root" events.
-                log.debug("created in or renamed into root: %s", event.path)
-                if event.otype == DIRECTORY:
-                    return EventFilter.WALK
-            elif prior_subpath and not curr_subpath:
-                # Rename out of root: process the event.
-                # Treated as a delete by the sync engine, which handles non-empty folders by marking
-                # children "changed" and processing them first.
-                log.debug("renamed out of root: %s", event.path)
-            else:
-                # both curr and prior are subpaths == rename within root (process event)
-                # neither is subpath == rename outside root (ignore event)
-                return EventFilter.PROCESS if curr_subpath else EventFilter.IGNORE
-
-        return EventFilter.PROCESS
 
     def _prep_upload(self, path, metadata):
         # modification time
