@@ -349,9 +349,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
     def _convert_to_event(self, change, new_cursor):
         ts = arrow.get(change.get('time')).float_timestamp
         oid = change.get('fileId')
+        # File is removed: exists is False. Else: the file may be trashed, mark exists as None
         exists = None
         if change.get('removed') is True:
-            # Can't necessarily mark exists as true, could be trashed
             exists = False
 
         fil = change.get('file')

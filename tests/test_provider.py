@@ -56,12 +56,12 @@ def test_trashed_files_folders(provider):
     assert not fold1_oid in listdir_oids
     assert fold2_oid in listdir_oids
 
-    # This is necessary to mimic the event received from the gdrive api if
-    # this folder were to be trashed from the web gui or from another user
     api = provider._api
     def patched_api(resource, method, *args, **kwargs):
         if resource == 'changes' and method == 'list':
-            return { 'changes' : [{ 'fileId': fold1_oid, 'time': datetime.datetime.now(),
+            return { 'changes' : [ { 'fileId': fold1_oid, 'time': datetime.datetime.now(),
+                'file': { 'mimeType': provider._folder_mime_type }, 'removed': True},
+                { 'fileId': fold2_oid, 'time': datetime.datetime.now(),
                 'file': { 'mimeType': provider._folder_mime_type }, 'removed': False}]}
         else:
             return api(resource, method, *args, **kwargs)
@@ -69,9 +69,16 @@ def test_trashed_files_folders(provider):
     with patch.object(provider, "_api", side_effect=patched_api):
         events = list(provider.events())
 
-    assert len(events) == 1
-    # Mark trashed folder non existant
-    assert not events[0].exists
+    assert len(events) == 2
+    for e in events:
+        # If removed, exists is False, else None
+        if e.oid == fold1_oid:
+            assert e.exists is False
+        elif e.oid == fold2_oid:
+            assert e.exists is None
+        else:
+            # Unexcepted event
+            assert False
 
 def test_shared_folder_pids(provider):
     _api = provider._api
