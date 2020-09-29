@@ -31,7 +31,7 @@ from cloudsync.oauth import OAuthConfig, OAuthError, OAuthProviderInfo
 CACHE_QUOTA_TIME = 120
 
 
-__version__ = "1.0.6"
+__version__ = "1.0.7"
 
 
 class GDriveFileDoneError(Exception):
@@ -572,7 +572,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 res = self._api('files', 'list',
                                 q=query,
                                 spaces='drive',
-                                fields='files(id, md5Checksum, parents, name, mimeType, trashed, shared, capabilities), nextPageToken',
+                                fields='files(id, md5Checksum, parents, name, mimeType, trashed, shared, headRevisionId, capabilities), nextPageToken',
                                 pageToken=page_token,
                                 includeItemsFromAllDrives=True,
                                 supportsAllDrives=True
@@ -696,7 +696,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             res = self._api('files', 'list',
                             q=query,
                             spaces='drive',
-                            fields='files(id, md5Checksum, parents, mimeType, trashed, name, shared, capabilities)',
+                            fields='files(id, md5Checksum, parents, mimeType, trashed, name, shared, headRevisionId, capabilities)',
                             pageToken=None,
                             includeItemsFromAllDrives=True,
                             supportsAllDrives=True)
@@ -823,7 +823,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
     def _info_oid(self, oid) -> Optional[GDriveInfo]:
         try:
             res = self._api('files', 'get', fileId=oid, supportsAllDrives=True, 
-                            fields='name, md5Checksum, parents, mimeType, trashed, shared, capabilities, size')
+                            fields='name, md5Checksum, parents, mimeType, trashed, shared, headRevisionId, capabilities, size')
         except CloudFileNotFoundError:
             log.debug("info oid %s : not found", oid)
             if oid == self.__root_id:
