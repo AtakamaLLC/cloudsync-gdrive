@@ -31,7 +31,7 @@ from cloudsync.oauth import OAuthConfig, OAuthError, OAuthProviderInfo
 CACHE_QUOTA_TIME = 120
 
 
-__version__ = "1.0.7"
+__version__ = "1.0.8"
 
 
 class GDriveFileDoneError(Exception):
@@ -452,7 +452,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         fields = 'id, md5Checksum, size'
 
-        parent_oid = self._get_parent_id(path)
+        # Cache is accurate, just refreshed from exists_path() call
+        parent_oid = self._get_parent_id(path, use_cache=True)
 
         gdrive_info['parents'] = [parent_oid]
 
@@ -499,7 +500,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 done = True
 
     def rename(self, oid, path):  # pylint: disable=too-many-locals, too-many-branches
-        pid = self._get_parent_id(path)
+        # Use cache to get parent id, no need to hit info_path twice
+        possible_conflict = self.info_path(path)
+        pid = self._get_parent_id(path, use_cache=True)
 
         add_pids = [pid]
         if pid == 'root':  # pragma: no cover
@@ -516,8 +519,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         _, name = self.split(path)
         body = {'name': name}
 
-        if self.exists_path(path):
-            possible_conflict = self.info_path(path)
+        if possible_conflict:
             if FILE in (info.otype, possible_conflict.otype):
                 if possible_conflict.oid != oid:  # it's OK to rename a file over itself, frex, to change case
                     raise CloudFileExistsError(path)
@@ -620,7 +622,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 raise CloudFileExistsError(path)
             log.debug("Skipped creating already existing folder: %s", path)
             return info.oid
-        pid = self._get_parent_id(path)
+
+        # Cache is accurate, just refreshed from info_path call
+        pid = self._get_parent_id(path, use_cache=True)
         _, name = self.split(path)
         file_metadata = {
             'name': name,
@@ -758,7 +762,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         else:
             return self._ids.get(path)
 
-    def _get_parent_id(self, path):
+    def _get_parent_id(self, path, use_cache=False):
         if not path:
             return None
 
@@ -766,6 +770,10 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         if parent == path:
             return self._cached_id(parent)
+
+        cached_id = self._cached_id(parent)
+        if use_cache and cached_id:
+            return cached_id
 
         # get the latest version of the parent path
         # it may have changed, or case may be different, etc.
