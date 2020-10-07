@@ -80,7 +80,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
     def __init__(self, oauth_config: Optional[OAuthConfig] = None):
         super().__init__()
-        self.__root_id = None
+        self.__mydrive_root_id = None
         self.__cursor: Optional[str] = None
         self._creds = None
         self._client = None
@@ -88,6 +88,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         self._ids: Dict[str, str] = {}
         self._trashed_ids: Dict[str, str] = {}
         self._oauth_config = oauth_config
+
 
     @property
     def connected(self):
@@ -267,15 +268,15 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 raise CloudDisconnectedError("disconnected on timeout")
 
     @property
-    def _root_id(self):
-        if not self.__root_id:
+    def _mydrive_root_id(self):
+        if not self.__mydrive_root_id:
             res = self._api('files', 'get',
                             fileId='root',
                             fields='id',
                             )
-            self.__root_id = res['id']
-            self._ids[self.sep] = self.__root_id
-        return self.__root_id
+            self.__mydrive_root_id = res['id']
+            self._ids[self.sep] = self.__mydrive_root_id
+        return self.__mydrive_root_id
 
     def disconnect(self):
         self._client = None
@@ -507,7 +508,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         add_pids = [pid]
         if pid == 'root':  # pragma: no cover
             # cant ever get hit from the tests due to test root
-            add_pids = [self._root_id]
+            add_pids = [self._mydrive_root_id]
 
         info = self._info_oid(oid)
         if info is None:
@@ -563,7 +564,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         return oid
 
     def listdir(self, oid) -> Generator[GDriveInfo, None, None]:  # pylint: disable=too-many-branches
-        if oid == self._root_id:
+        if oid == self._mydrive_root_id:
             query = f"'{oid}' in parents or sharedWithMe"
         else:
             query = f"'{oid}' in parents"
@@ -600,9 +601,6 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 if fid == oid:
                     continue
                 pids = ent.get('parents', [])
-                if not pids and ent.get('shared'):
-                    # shared folders without a parent should be interpreted as children of root
-                    pids = [self._root_id]
                 fhash = ent.get('md5Checksum')
                 name = ent['name']
                 shared = ent['shared']
@@ -651,7 +649,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 raise CloudFileExistsError("Cannot delete non-empty folder %s:%s" % (oid, info.name))
             except StopIteration:
                 pass  # Folder is empty, delete it no problem
-        if oid == self._root_id:
+        if oid == self._mydrive_root_id or oid == self._root_oid:
             raise CloudFileExistsError("Cannot delete root folder")
         try:
             self._api('files', 'delete', fileId=oid)
@@ -683,16 +681,20 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         return self._info_oid(oid) is not None
 
     def info_path(self, path: str, use_cache=True) -> Optional[OInfo]:  # pylint: disable=too-many-locals, too-many-branches
+        if path == self._root_path:
+            self._ids[self._root_path] = self._root_oid
+            return self.info_oid(self._root_oid)
+
         if path == self.sep:
-            self._ids[self.sep] = self._root_id
-            return self.info_oid(self._root_id)
+            self._ids[self.sep] = self._mydrive_root_id
+            return self.info_oid(self._mydrive_root_id)
 
         try:
             parent_id = self._get_parent_id(path)
             _, name = self.split(path)
 
             escaped_name = self.__escape(name)
-            if parent_id == self._root_id:
+            if parent_id == self._mydrive_root_id:
                 query = f"(sharedWithMe or '{parent_id}' in parents) and name='{escaped_name}'"
             else:
                 query = f"'{parent_id}' in parents and name='{escaped_name}'"
@@ -729,9 +731,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         oid = ent['id']
         pids = ent.get('parents')
-        if not pids and res.get('shared'):
-            # top level shared folders don't have parents, fill as root oid
-            pids = [self._root_id]
+        if not pids:
+            raise CloudTemporaryError("Missing parents for oid %s" % oid)
 
         fhash = ent.get('md5Checksum')
         name = ent.get('name')
@@ -757,8 +758,10 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         return self.info_path(path) is not None
 
     def _cached_id(self, path):
-        if path == self.sep:
-            return self._root_id
+        if path == self._root_path:
+            return self._root_oid
+        elif path == self.sep:
+            return self._mydrive_root_id
         else:
             return self._ids.get(path)
 
@@ -795,8 +798,11 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 if pid == oid:
                     return p
 
-        if oid == self._root_id:
-            return "/"
+        if oid == self._root_oid:
+            return self._root_path
+
+        if oid == self._mydrive_root_id:
+            return self.sep
 
         # todo, better cache, keep up to date, etc.
 
@@ -834,13 +840,13 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                             fields='name, md5Checksum, parents, mimeType, trashed, shared, headRevisionId, capabilities, size')
         except CloudFileNotFoundError:
             log.debug("info oid %s : not found", oid)
-            if oid == self.__root_id:
+            if oid == self.__mydrive_root_id:
                 # Root id is stale, refresh
-                self.__root_id = None
-                new_root_id = self._root_id
+                self.__mydrive_root_id = None
+                new_mydrive_root_id = self._mydrive_root_id
                 # prevent infinite recursion
-                if new_root_id != oid:
-                    return self._info_oid(new_root_id)
+                if new_mydrive_root_id != oid:
+                    return self._info_oid(new_mydrive_root_id)
 
             return None
 
@@ -849,9 +855,13 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             return None
 
         pids = res.get('parents')
-        if not pids and res.get('shared'):
-            # top level shared folders don't have parents, fill as root oid
-            pids = [self._root_id]
+        if not pids:
+            if self._root_oid is not None and oid != self._root_oid:
+                raise CloudTemporaryError("Missing parents for oid %s" % oid)
+            else:
+                # top level shared folders don't have parents, fill as mydrive root oid
+                pids = [self._mydrive_root_id]
+
         fhash = res.get('md5Checksum')
         name = res.get('name')
         shared = res['shared']
