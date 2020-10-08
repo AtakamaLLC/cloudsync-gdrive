@@ -649,7 +649,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 raise CloudFileExistsError("Cannot delete non-empty folder %s:%s" % (oid, info.name))
             except StopIteration:
                 pass  # Folder is empty, delete it no problem
-        if oid == self._mydrive_root_id or oid == self._root_oid:
+        if oid in (self._mydrive_root_id, self._root_oid):
             raise CloudFileExistsError("Cannot delete root folder")
         try:
             self._api('files', 'delete', fileId=oid)
@@ -680,7 +680,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
     def exists_oid(self, oid):
         return self._info_oid(oid) is not None
 
-    def info_path(self, path: str, use_cache=True) -> Optional[OInfo]:  # pylint: disable=too-many-locals, too-many-branches
+    def info_path(self, path: str, use_cache=True) -> Optional[OInfo]:  # pylint: disable=too-many-locals, too-many-branches, too-many-return-statements
         if path == self._root_path:
             self._ids[self._root_path] = self._root_oid
             return self.info_oid(self._root_oid)
