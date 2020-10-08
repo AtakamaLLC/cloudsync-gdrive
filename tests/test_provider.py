@@ -90,9 +90,9 @@ def test_shared_folder_pids(provider):
 
     with patch.object(provider, "_api", side_effect=_mock_api):
         # Avoid __filter_root in mixin, test_root can't be in path
-        listdir_res = list(provider.prov.listdir(provider._root_id))
+        listdir_res = list(provider.prov.listdir(provider._mydrive_root_id))
         info_oid_res = provider.info_oid('fake_oid')
 
     assert len(listdir_res) == 1
-    assert provider._root_id in listdir_res[0].pids
-    assert provider._root_id in info_oid_res.pids
+    assert listdir_res[0].pids == []
+    assert provider._mydrive_root_id in info_oid_res.pids

@@ -732,7 +732,11 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         oid = ent['id']
         pids = ent.get('parents')
         if not pids:
-            raise CloudTemporaryError("Missing parents for oid %s" % oid)
+            if self._root_oid is not None and oid != self._root_oid:
+                # top level shared folders don't have parents, fill as mydrive root oid
+                return None
+            else:
+                pids = [self.__mydrive_root_id]
 
         fhash = ent.get('md5Checksum')
         name = ent.get('name')
@@ -857,7 +861,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         pids = res.get('parents')
         if not pids:
             if self._root_oid is not None and oid != self._root_oid:
-                raise CloudTemporaryError("Missing parents for oid %s" % oid)
+                return None
             else:
                 # top level shared folders don't have parents, fill as mydrive root oid
                 pids = [self._mydrive_root_id]
