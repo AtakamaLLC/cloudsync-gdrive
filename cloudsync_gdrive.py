@@ -889,7 +889,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         if not parent_oid:
             return {}
         
-        # Don't propogate pids for top level folders
+        # Don't propagate pids for top level folders
         return {} if parent_oid == self._root_id else {'pid': parent_oid}
 
     def _resolve_missing_parent(self, res):
