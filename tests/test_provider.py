@@ -99,7 +99,7 @@ def test_shared_folder_pids(provider):
 
 def test_pid_from_metadata(provider):
     api = provider._api
-    def missing_parent_api(resource, method, *args, **kwargs):
+    def missing_parent_api(resource, method, *args, **kwargs): # pragma: no cover
         res = api(resource, method, *args, **kwargs)
         if resource == "files" and method == "list":
             res["files"][0].pop("parents", "")
