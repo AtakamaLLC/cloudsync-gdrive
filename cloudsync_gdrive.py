@@ -31,7 +31,7 @@ from cloudsync.oauth import OAuthConfig, OAuthError, OAuthProviderInfo
 CACHE_QUOTA_TIME = 120
 
 
-__version__ = "1.0.8"
+__version__ = "1.0.9"
 
 
 class GDriveFileDoneError(Exception):
@@ -443,8 +443,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
     def create(self, path, file_like, metadata=None) -> 'OInfo':
         if not metadata:
             metadata = {}
-        gdrive_info = self._prep_upload(path, metadata)
-
+        
         if self.exists_path(path):
             raise CloudFileExistsError()
 
@@ -454,7 +453,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         # Cache is accurate, just refreshed from exists_path() call
         parent_oid = self._get_parent_id(path, use_cache=True)
-
+        metadata['appProperties'] = self._prep_app_properties(parent_oid)
+        gdrive_info = self._prep_upload(path, metadata)
         gdrive_info['parents'] = [parent_oid]
 
         try:
@@ -517,7 +517,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         old_path = info.path
 
         _, name = self.split(path)
-        body = {'name': name}
+        appProperties = self._prep_app_properties(pid)
+        body = {'name': name, 'appProperties': appProperties}
 
         if possible_conflict:
             if FILE in (info.otype, possible_conflict.otype):
@@ -574,7 +575,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 res = self._api('files', 'list',
                                 q=query,
                                 spaces='drive',
-                                fields='files(id, md5Checksum, parents, name, mimeType, trashed, shared, headRevisionId, capabilities), nextPageToken',
+                                fields='files(id, md5Checksum, parents, name, mimeType, trashed, shared, \
+                                headRevisionId, capabilities, appProperties), nextPageToken',
                                 pageToken=page_token,
                                 includeItemsFromAllDrives=True,
                                 supportsAllDrives=True
@@ -601,8 +603,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                     continue
                 pids = ent.get('parents', [])
                 if not pids and ent.get('shared'):
-                    # shared folders without a parent should be interpreted as children of root
-                    pids = [self._root_id]
+                    pids = self._resolve_missing_parent(ent) 
                 fhash = ent.get('md5Checksum')
                 name = ent['name']
                 shared = ent['shared']
@@ -626,10 +627,13 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         # Cache is accurate, just refreshed from info_path call
         pid = self._get_parent_id(path, use_cache=True)
         _, name = self.split(path)
+
+        appProperties = self._prep_app_properties(pid)
         file_metadata = {
             'name': name,
             'parents': [pid],
             'mimeType': self._folder_mime_type,
+            'appProperties': appProperties
         }
         if metadata:
             file_metadata.update(metadata)
@@ -700,7 +704,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             res = self._api('files', 'list',
                             q=query,
                             spaces='drive',
-                            fields='files(id, md5Checksum, parents, mimeType, trashed, name, shared, headRevisionId, capabilities)',
+                            fields='files(id, md5Checksum, parents, mimeType, trashed, name, shared, \
+                            headRevisionId, capabilities, appProperties)',
                             pageToken=None,
                             includeItemsFromAllDrives=True,
                             supportsAllDrives=True)
@@ -730,8 +735,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         oid = ent['id']
         pids = ent.get('parents')
         if not pids and res.get('shared'):
-            # top level shared folders don't have parents, fill as root oid
-            pids = [self._root_id]
+            pids = self._resolve_missing_parent(ent)
 
         fhash = ent.get('md5Checksum')
         name = ent.get('name')
@@ -831,7 +835,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
     def _info_oid(self, oid) -> Optional[GDriveInfo]:
         try:
             res = self._api('files', 'get', fileId=oid, supportsAllDrives=True, 
-                            fields='name, md5Checksum, parents, mimeType, trashed, shared, headRevisionId, capabilities, size')
+                            fields='name, md5Checksum, parents, mimeType, trashed, shared, \
+                            headRevisionId, capabilities, appProperties, size')
         except CloudFileNotFoundError:
             log.debug("info oid %s : not found", oid)
             if oid == self.__root_id:
@@ -850,8 +855,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         pids = res.get('parents')
         if not pids and res.get('shared'):
-            # top level shared folders don't have parents, fill as root oid
-            pids = [self._root_id]
+            pids = self._resolve_missing_parent(res)
         fhash = res.get('md5Checksum')
         name = res.get('name')
         shared = res['shared']
@@ -881,5 +885,21 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                     self._ids.pop(cpath)
         return True
 
+    def _prep_app_properties(self, parent_oid):
+        if not parent_oid:
+            return {}
+        
+        # Don't propagate pids for top level folders
+        return {} if parent_oid == self._root_id else {'pid': parent_oid}
+
+    def _resolve_missing_parent(self, res):
+        # Check if there is a pid in app metadata, res is a gdrive Files resource
+        appProperties = res.get('appProperties', {})
+        meta_pid = appProperties.get('pid', None)
+        if meta_pid:
+            return [meta_pid]
+        else:
+            # shared folders without a parent should be interpreted as children of root
+            return [self._root_id]
 
 __cloudsync__ = GDriveProvider

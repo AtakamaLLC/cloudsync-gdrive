@@ -96,3 +96,46 @@ def test_shared_folder_pids(provider):
     assert len(listdir_res) == 1
     assert provider._root_id in listdir_res[0].pids
     assert provider._root_id in info_oid_res.pids
+
+def test_pid_from_metadata(provider):
+    api = provider._api
+    def missing_parent_api(resource, method, *args, **kwargs): # pragma: no cover
+        res = api(resource, method, *args, **kwargs)
+        if resource == "files" and method == "list":
+            res["files"][0].pop("parents", "")
+        elif resource == "files" and method == "get":
+            res.pop("parents", "")
+
+        return res
+
+    folder_name1 = "/folder1"
+    folder_name2 = "/folder1/folder2"
+    file_name = "/file.txt"
+
+    folder1_oid = provider.mkdir(folder_name1)
+    folder2_oid = provider.mkdir(folder_name2)
+    file_info = provider.create(folder_name2 + file_name, io.BytesIO(b"Hello"))
+
+    info = provider.info_oid(folder2_oid)
+    assert info.path == folder_name2
+    assert info.pids == [folder1_oid]
+    info = provider.info_path(folder_name2)
+    assert info.path == folder_name2
+    assert info.pids == [folder1_oid]
+
+    info = provider.info_oid(file_info.oid)
+    assert info.path == folder_name2 + file_name
+    assert info.pids == [folder2_oid]
+    info = provider.info_path(folder_name2 + file_name)
+    assert info.path == folder_name2 + file_name
+    assert info.pids == [folder2_oid]
+
+    provider.rename(file_info.oid, folder_name1 + file_name)
+
+    info = provider.info_oid(file_info.oid)
+    assert info.path == folder_name1 + file_name
+    assert info.pids == [folder1_oid]
+    info = provider.info_path(folder_name1 + file_name)
+    assert info.path == folder_name1 + file_name
+    assert info.pids == [folder1_oid]
+
