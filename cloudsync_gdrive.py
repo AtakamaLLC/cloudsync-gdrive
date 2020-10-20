@@ -51,7 +51,6 @@ class GDriveInfo(DirInfo):  # pylint: disable=too-few-public-methods
     hash: Any
     otype: OType
     path: str
-    size: int
 
     def __init__(self, *a, pids=None, **kws):
         super().__init__(*a, **kws)
@@ -410,7 +409,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         gdrive_info = self._prep_upload(None, metadata)
         ul, size = self._media_io(file_like)
 
-        fields = 'id, md5Checksum'
+        fields = 'id, md5Checksum, modifiedTime'
 
         try:
             def api_call():
@@ -433,12 +432,16 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         if not res:
             raise CloudTemporaryError("unknown response from drive on upload")
 
+        mtime = res.get('modifiedTime')
+        mtime = mtime and self._parse_time(mtime)
+
         md5 = res.get('md5Checksum', None)  # can be none if the user tries to upload to a folder
         if md5 is None:
             possible_conflict = self._info_oid(oid)
             if possible_conflict and possible_conflict.otype == DIRECTORY:
                 raise CloudFileExistsError("Can only upload to a file: %s" % possible_conflict.path)
-        return OInfo(otype=FILE, oid=res['id'], hash=md5, path=None, size=size)
+
+        return OInfo(otype=FILE, oid=res['id'], hash=md5, path=None, size=size, mtime=mtime)
 
     def create(self, path, file_like, metadata=None) -> 'OInfo':
         if not metadata:
@@ -449,7 +452,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         ul, size = self._media_io(file_like)
 
-        fields = 'id, md5Checksum, size'
+        fields = 'id, md5Checksum, size, modifiedTime'
 
         # Cache is accurate, just refreshed from exists_path() call
         parent_oid = self._get_parent_id(path, use_cache=True)
@@ -482,12 +485,14 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         log.debug("path cache %s", self._ids)
 
         size = int(res.get("size", 0))
+        mtime = res.get('modifiedTime')
+        mtime = mtime and self._parse_time(mtime)
 
         cache_ent = self.get_quota.get()  # pylint: disable=no-member
         if cache_ent:
             cache_ent["used"] += size
 
-        return OInfo(otype=FILE, oid=res['id'], hash=res['md5Checksum'], path=path, size=size)
+        return OInfo(otype=FILE, oid=res['id'], hash=res['md5Checksum'], path=path, size=size, mtime=mtime)
 
     def download(self, oid, file_like):
         req = self._api('files', 'get_media', fileId=oid)
@@ -576,7 +581,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                                 q=query,
                                 spaces='drive',
                                 fields='files(id, md5Checksum, parents, name, mimeType, trashed, shared, \
-                                headRevisionId, capabilities, appProperties), nextPageToken',
+                                headRevisionId, capabilities, appProperties, modifiedTime, size), nextPageToken',
                                 pageToken=page_token,
                                 includeItemsFromAllDrives=True,
                                 supportsAllDrives=True
@@ -609,12 +614,16 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                 shared = ent['shared']
                 readonly = not ent['capabilities']['canEdit']
                 trashed = ent.get('trashed', False)
+                mtime = ent.get('modifiedTime')
+                mtime = mtime and self._parse_time(mtime)
+                size = int(ent.get('size', 0))
                 if ent.get('mimeType') == self._folder_mime_type:
                     otype = DIRECTORY
                 else:
                     otype = FILE
                 if not trashed:
-                    yield GDriveInfo(otype, fid, fhash, None, shared=shared, readonly=readonly, pids=pids, name=name)
+                    yield GDriveInfo(otype, fid, fhash, None, shared=shared, readonly=readonly, pids=pids, name=name,
+                                     mtime=mtime, size=size)
 
     def mkdir(self, path, metadata=None) -> str:  # pylint: disable=arguments-differ
         info = self.info_path(path)
@@ -705,7 +714,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
                             q=query,
                             spaces='drive',
                             fields='files(id, md5Checksum, parents, mimeType, trashed, name, shared, \
-                            headRevisionId, capabilities, appProperties)',
+                            headRevisionId, capabilities, appProperties, modifiedTime, size)',
                             pageToken=None,
                             includeItemsFromAllDrives=True,
                             supportsAllDrives=True)
@@ -739,6 +748,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         fhash = ent.get('md5Checksum')
         name = ent.get('name')
+        size = int(ent.get('size', 0))
+        mtime = ent.get('modifiedTime')
+        mtime = mtime and self._parse_time(mtime)
 
         # query is insensitive to certain features of the name
         # ....cache correct basename
@@ -753,7 +765,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         self._ids[path] = oid
 
-        return GDriveInfo(otype, oid, fhash, path, shared=shared, readonly=readonly, pids=pids)
+        return GDriveInfo(otype, oid, fhash, path, shared=shared, readonly=readonly, name=name, pids=pids, size=size, mtime=mtime)
 
     def exists_path(self, path) -> bool:
         if self._cached_id(path):
@@ -834,9 +846,9 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
     def _info_oid(self, oid) -> Optional[GDriveInfo]:
         try:
-            res = self._api('files', 'get', fileId=oid, supportsAllDrives=True, 
+            res = self._api('files', 'get', fileId=oid, supportsAllDrives=True,
                             fields='name, md5Checksum, parents, mimeType, trashed, shared, \
-                            headRevisionId, capabilities, appProperties, size')
+                            headRevisionId, capabilities, appProperties, size, modifiedTime')
         except CloudFileNotFoundError:
             log.debug("info oid %s : not found", oid)
             if oid == self.__root_id:
@@ -859,14 +871,17 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         fhash = res.get('md5Checksum')
         name = res.get('name')
         shared = res['shared']
-        size = res.get('size', 0)
+        size = int(res.get("size", 0))
+
+        mtime = res.get('modifiedTime')
+        mtime = mtime and self._parse_time(mtime)
         readonly = not res['capabilities']['canEdit']
         if res.get('mimeType') == self._folder_mime_type:
             otype = DIRECTORY
         else:
             otype = FILE
 
-        return GDriveInfo(otype, oid, fhash, None, shared=shared, readonly=readonly, pids=pids, name=name, size=size)
+        return GDriveInfo(otype, oid, fhash, None, shared=shared, readonly=readonly, pids=pids, name=name, size=size, mtime=mtime)
 
     @classmethod
     def test_instance(cls):
@@ -901,5 +916,13 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
         else:
             # shared folders without a parent should be interpreted as children of root
             return [self._root_id]
+
+    def _parse_time(self, rfc3339_time_str):
+        try:
+            ret_val = arrow.get(rfc3339_time_str).timestamp
+        except Exception as e:
+            log.error("could not convert rfc3339 formatted time string '%s' to timestamp: %s" % (rfc3339_time_str, e))
+            ret_val = 0
+        return ret_val
 
 __cloudsync__ = GDriveProvider
