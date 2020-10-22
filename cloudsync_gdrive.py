@@ -568,7 +568,7 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
 
         return oid
 
-    def listdir(self, oid) -> Generator[GDriveInfo, None, None]:  # pylint: disable=too-many-branches
+    def listdir(self, oid) -> Generator[GDriveInfo, None, None]:  # pylint: disable=too-many-branches, too-many-locals
         if oid == self._root_id:
             query = f"'{oid}' in parents or sharedWithMe"
         else:
@@ -917,11 +917,12 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             # shared folders without a parent should be interpreted as children of root
             return [self._root_id]
 
-    def _parse_time(self, rfc3339_time_str):
+    @staticmethod
+    def _parse_time(rfc3339_time_str):
         try:
             ret_val = arrow.get(rfc3339_time_str).timestamp
         except Exception as e:
-            log.error("could not convert rfc3339 formatted time string '%s' to timestamp: %s" % (rfc3339_time_str, e))
+            log.error("could not convert rfc3339 formatted time string '%s' to timestamp: %s", rfc3339_time_str, e)
             ret_val = 0
         return ret_val
 
