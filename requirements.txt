@@ -1,18 +1,18 @@
 # dev/deploy
-flit
-pylint
-mypy
-pytest
-pytest-coverage
-pytest-timeout
-pytest-xdist
+flit==2.3.0
+pylint==2.5.3
+mypy==0.782
+pytest==5.4.3
+pytest-coverage==0.0.1
+pytest-timeout==1.4.2
+pytest-xdist==1.33.0
 
 # from pyproject.toml
 cloudsync>=v1.3.22a2
 
 # gdrive provider
-google-oauth
-google-auth-httplib2
-google-api-python-client
+google-oauth==1.0.1
+google-auth-httplib2==0.0.4
+google-api-python-client==1.10.0
 
-codecov
+codecov==2.1.8
