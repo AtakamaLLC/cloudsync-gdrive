@@ -264,6 +264,8 @@ class GDriveProvider(Provider):  # pylint: disable=too-many-public-methods, too-
             except (TimeoutError, HttpLib2Error):
                 self.disconnect()
                 raise CloudDisconnectedError("disconnected on timeout")
+            except ConnectionResetError:
+                raise CloudTemporaryError("An existing connection was forcibly closed by the remote host")
 
     @property
     def _root_id(self):
