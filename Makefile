@@ -14,7 +14,7 @@ requirements: env
 lint: requirements
 	. env/$(ENVBIN)/activate && pylint *.py
 	. env/$(ENVBIN)/activate && mypy -V
-	echo $PYTHONPATH
+	echo $(PYTHONPATH)
 	. env/$(ENVBIN)/activate && mypy .
 
 test: requirements
