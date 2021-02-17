@@ -8,7 +8,7 @@ pytest-timeout
 pytest-xdist
 
 # from pyproject.toml
-cloudsync~=3.0.0a4
+cloudsync~=3.0.0
 
 # gdrive provider
 google-oauth
