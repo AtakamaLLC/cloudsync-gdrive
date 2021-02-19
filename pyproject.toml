@@ -1,5 +1,5 @@
 [build-system]
-requires = ["flit"]
+requires = ["setuptools", "flit"]
 build-backend = "flit.buildapi"
 
 [tool.flit.metadata]
@@ -14,7 +14,7 @@ classifiers=["Intended Audience :: Developers",
     "Programming Language :: Python",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-requires = ["cloudsync>=v1.3.22a2", "google-oauth", "google-auth-httplib2", "google-api-python-client"]
+requires = ["cloudsync~=3.0.0", "google-oauth", "google-auth-httplib2", "google-api-python-client"]
 requires-python = ">=3.6"
 
 [tool.flit.entrypoints.cloudsync.providers]

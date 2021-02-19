@@ -13,6 +13,7 @@ requirements: env
 
 lint: requirements
 	. env/$(ENVBIN)/activate && pylint *.py
+	. env/$(ENVBIN)/activate && mypy -V
 	. env/$(ENVBIN)/activate && mypy .
 
 test: requirements
