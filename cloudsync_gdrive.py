@@ -1,7 +1,7 @@
 """
 Provider "gdrive", exports GDriveProvider
 """
-# pylint: disable=missing-docstring
+# pylint: disable=missing-docstring, consider-using-f-string
 
 import io
 import time
