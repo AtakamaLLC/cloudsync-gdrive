@@ -1,7 +1,7 @@
 """
 Provider "gdrive", exports GDriveProvider
 """
-# pylint: disable=missing-docstring
+# pylint: disable=missing-docstring, consider-using-f-string
 
 import io
 import time
@@ -31,7 +31,7 @@ from cloudsync.oauth import OAuthConfig, OAuthError, OAuthProviderInfo
 CACHE_QUOTA_TIME = 120
 
 
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 
 
 class GDriveFileDoneError(Exception):
